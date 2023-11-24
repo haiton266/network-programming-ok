@@ -29,7 +29,7 @@ def http_call():
 @socketio.on("connect")
 def connected():
     print(request.sid)
-    print("client has connected")
+    print(f"client has connected request.sid: {request.sid}")
     emit("connect", {"data": f"id: {request.sid} is connected"})
 
 
@@ -137,15 +137,23 @@ def logout():
 
 @socketio.on("disconnect")
 def disconnected():
-    # Xóa thông tin người dùng khi họ disconnect
+    # Lấy lý do ngắt kết nối
+    disconnect_reason = request.args.get('reason', 'unknown')
+
+    # Xử lý việc rời khỏi phòng và xóa thông tin người dùng
     room = room_user_map.pop(request.sid, None)
     if room:
-        leave_room(room)  # Rời khỏi phòng nếu người dùng đang ở trong phòng
-        emit("disconnect", f"user {request.sid} disconnected", room=room)
+        leave_room(room)
+        emit("disconnect", {'user': request.sid,
+             'reason': disconnect_reason}, room=room)
+
+    # Xóa thông tin người dùng đã đăng nhập
     for username, sid in logged_in_users.items():
         if sid == request.sid:
             del logged_in_users[username]
             break
+
+    print(f"User {request.sid} disconnected due to: {disconnect_reason}")
 
 
 if __name__ == '__main__':
