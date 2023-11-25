@@ -17,6 +17,8 @@ export default function ChatRoom({ socket }) {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [room, setRoom] = useState('');
+  const [password, setPassword] = useState('');
+  // const [isInRoom, setIsInRoom] = useState(false);
   const currentUser = localStorage.getItem('username');
   const messagesEndRef = useRef(null);
 
@@ -38,20 +40,49 @@ export default function ChatRoom({ socket }) {
   };
 
   const handleJoinRoom = () => {
-    if (!room) {
-      toast.error('Please enter a room name!');
+    if (!room || !password) {
+      toast.error('Please enter a room name and password!');
       return;
     }
-    socket.emit('join', { room });
+    socket.emit('join', { 'room': room, 'password': password });
   };
 
+  const handleCreateRoom = () => {
+    if (!password) {
+      toast.error('Please enter password!');
+      return;
+    }
+    socket.emit('create', { 'password': password, 'username': currentUser });
+  };
+
+
   useEffect(() => {
+    socket.emit('autologin', { 'username': currentUser });
+
+    socket.on('old_messages', (data) => {
+      let x = JSON.parse(data.messages);
+      // Transform x into the desired format for messages
+      const newMessages = x.map(msg => ({
+        user: msg.username,
+        data: msg.message // Assuming you want to store the password as 'data'
+      }));
+      console.log('newMessages', newMessages);
+      setMessages(newMessages);
+    });
+
     socket.on('data', (data) => {
       setMessages((prevMessages) => [...prevMessages, { user: data.name, data: data.data }]);
     });
 
     socket.on('joined', (data) => {
       toast.info(data.data);
+    });
+
+    socket.on('create_status', (data) => {
+      toast.info(data.message);
+      if (data.message === 'Room created successfully') {
+        setRoom(data.room_id);
+      }
     });
 
     return () => {
@@ -76,14 +107,25 @@ export default function ChatRoom({ socket }) {
             <MDBCard id="chat2" style={{ borderRadius: '15px' }}>
               <MDBCardHeader className="d-flex justify-content-between align-items-center p-3">
                 <h5 className="mb-0">You are in room: {room}</h5>
-                <Form className="d-flex align-items-center">
-                  <MDBInput label='Enter chat room' id='form1' type='text' value={room}
-                    onChange={(e) => setRoom(e.target.value)} />
-                  <Button size="sm" onClick={handleJoinRoom}>
-                    Join Room
-                  </Button>
-                </Form>
+                <div>
+                  <Form className="d-flex align-items-center">
+                    <MDBInput label='Enter chat room' id='form1' type='text' value={room}
+                      onChange={(e) => setRoom(e.target.value)} />
+                    <MDBInput label='Enter password' id='form1' type='password'
+                      onChange={(e) => setPassword(e.target.value)} />
+                    <Button size="sm" onClick={handleJoinRoom}>
+                      Join Room
+                    </Button>
+                    <Button size="sm" onClick={handleCreateRoom}>
+                      Create Room
+                    </Button>
+                  </Form>
+                  <h5 style={{ fontSize: 'small', fontStyle: 'italic', color: '#ffcc00' }}>
+                    If you create room, you only enter password!
+                  </h5>
+                </div>
               </MDBCardHeader>
+
               <MDBCardBody style={{ overflowY: 'auto', maxHeight: '400px' }}>
                 {messages.map((msg, index) => (
                   msg.user === currentUser ? (
