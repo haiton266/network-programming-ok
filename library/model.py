@@ -31,3 +31,13 @@ class ChatMesssages(db.Model):
         self.room_id = room_id
         self.username = username
         self.message = message
+
+
+class Members(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(100), nullable=False)
+    room_id = db.Column(db.Integer, nullable=False)
+
+    def __init__(self, room_id, username):
+        self.room_id = room_id
+        self.username = username

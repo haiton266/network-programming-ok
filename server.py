@@ -2,14 +2,16 @@ from flask import Flask, request, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
 import eventlet
-from library.model import Users, ChatRooms, ChatMesssages
+from library.model import Users, ChatRooms, ChatMesssages, Members
 from library.extension import db
-from library.library_ma import UserSchema, ChatMessageSchema
+from library.library_ma import UserSchema, ChatMessageSchema, ChatRoomSchema, MemberSchema
 import json
 
 from library.library_ma import ChatMessageSchema
 chat_message_schema = ChatMessageSchema(many=True)
 users_schema = UserSchema(many=True)
+rooms_schema = ChatRoomSchema(many=True)
+members_schema = MemberSchema(many=True)
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -83,6 +85,10 @@ def login(data):
             user.sid = request.sid
             db.session.commit()
             logged_in_users[username] = request.sid
+            room_of_user = Members.query.filter_by(username=username).all()
+            room_of_user = json.dumps(members_schema.dump(
+                room_of_user), ensure_ascii=False)
+            emit('get_rooms', {'rooms': room_of_user})
             emit('login_status', {'status': 'success',
                  'message': 'Logged in successfully!'})
     else:
@@ -95,6 +101,11 @@ def login(data):
     username = data.get('username')
     if username and username not in logged_in_users:
         logged_in_users[username] = request.sid
+        print('username: ', username)
+        room_of_user = Members.query.filter_by(username=username).all()
+        room_of_user = json.dumps(members_schema.dump(
+            room_of_user), ensure_ascii=False)
+        emit('get_rooms', {'rooms': room_of_user})
         print('auto login success')
     else:
         print('auto login fail')
@@ -120,6 +131,17 @@ def create(data):
             room_id = ChatRooms.query.order_by(ChatRooms.id.desc()).first().id
             join_room(room_id)
             room_user_map[request.sid] = room_id
+            username = next(
+                (username for username, sid in logged_in_users.items() if sid == request.sid), None)
+            member = Members(room_id, username)
+            db.session.add(member)
+            db.session.commit()
+
+            room_of_user = Members.query.filter_by(username=username).all()
+            room_of_user = json.dumps(members_schema.dump(
+                room_of_user), ensure_ascii=False)
+            emit('get_rooms', {'rooms': room_of_user})
+
             emit('create_status', {'status': 'success',
                  'message': 'Room created successfully', 'room_id': room_id})
 
@@ -145,6 +167,17 @@ def join(data):
             join_room(room_id)
             room_user_map[request.sid] = room_id
             emit("joined", {"data": f"You joined room {room_id}"})
+            username = next(
+                (username for username, sid in logged_in_users.items() if sid == request.sid), None)
+            member = Members(room_id, username)
+            if Members.query.filter_by(room_id=room_id, username=username).first() is None:
+                db.session.add(member)
+                db.session.commit()
+
+            room_of_user = Members.query.filter_by(username=username).all()
+            room_of_user = json.dumps(members_schema.dump(
+                room_of_user), ensure_ascii=False)
+            emit('get_rooms', {'rooms': room_of_user})
 
             # Fetch old messages from Users table
             messages = ChatMesssages.query.filter_by(room_id=room_id).all()
@@ -154,6 +187,8 @@ def join(data):
                     messages), ensure_ascii=False)
                 print('Old message: ', messages)
                 emit("old_messages", {'messages': messages})
+            else:
+                emit("old_messages", {'messages': '[]'})
         else:
             # Emit a message if the room does not exist or the password is incorrect
             emit("joined", {"data": "Invalid room or password"})

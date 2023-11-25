@@ -9,6 +9,8 @@ import {
   MDBCardFooter,
   MDBIcon,
   MDBInput,
+  MDBListGroup,
+  MDBListGroupItem
 } from 'mdb-react-ui-kit';
 import { Form, Button } from 'react-bootstrap';
 import { toast } from 'react-toastify';
@@ -18,6 +20,12 @@ export default function ChatRoom({ socket }) {
   const [messages, setMessages] = useState([]);
   const [room, setRoom] = useState('');
   const [password, setPassword] = useState('');
+  const [rooms, setRooms] = useState([
+    { id: 1, name: "Room 1" },
+    { id: 2, name: "Room 2" },
+    { id: 3, name: "Room 3" },
+    // thêm các phòng khác tùy ý
+  ]);
   // const [isInRoom, setIsInRoom] = useState(false);
   const currentUser = localStorage.getItem('username');
   const messagesEndRef = useRef(null);
@@ -52,13 +60,24 @@ export default function ChatRoom({ socket }) {
       toast.error('Please enter password!');
       return;
     }
+    setMessages([]);
     socket.emit('create', { 'password': password, 'username': currentUser });
   };
 
 
   useEffect(() => {
     socket.emit('autologin', { 'username': currentUser });
-
+    socket.on('get_rooms', (data) => {
+      let x = JSON.parse(data.rooms);
+      console.log('x', x);
+      const rooms_get = x.map(room => ({
+        id: room.id,
+        name: 'Room ' + room.room_id
+      }));
+      console.log('rooms', rooms_get);
+      setRooms(rooms_get);
+    }
+    );
     socket.on('old_messages', (data) => {
       let x = JSON.parse(data.messages);
       // Transform x into the desired format for messages
@@ -103,7 +122,19 @@ export default function ChatRoom({ socket }) {
     <>
       <MDBContainer fluid className="py-5" style={{ backgroundColor: '#eee' }}>
         <MDBRow className="d-flex justify-content-center">
-          <MDBCol md="10" lg="8" xl="6">
+          <MDBCol md="1" style={{ paddingRight: 0, marginRight: 0 }}>
+            <MDBListGroup>
+              {rooms.map((room) => (
+                <MDBListGroupItem
+                  key={room.id}
+                  onClick={() => toast.info(`You are in room: ${room.name}`)}
+                >
+                  {room.name}
+                </MDBListGroupItem>
+              ))}
+            </MDBListGroup>
+          </MDBCol>
+          <MDBCol md="5" lg="2" xl="5" style={{ paddingLeft: 0, marginLeft: 0 }}>
             <MDBCard id="chat2" style={{ borderRadius: '15px' }}>
               <MDBCardHeader className="d-flex justify-content-between align-items-center p-3">
                 <h5 className="mb-0">You are in room: {room}</h5>
@@ -125,7 +156,6 @@ export default function ChatRoom({ socket }) {
                   </h5>
                 </div>
               </MDBCardHeader>
-
               <MDBCardBody style={{ overflowY: 'auto', maxHeight: '400px' }}>
                 {messages.map((msg, index) => (
                   msg.user === currentUser ? (

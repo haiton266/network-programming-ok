@@ -14,3 +14,8 @@ class ChatRoomSchema(ma.Schema):
 class ChatMessageSchema(ma.Schema):
     class Meta:
         fields = ('id', 'room_id', 'username', 'message')
+
+
+class MemberSchema(ma.Schema):
+    class Meta:
+        fields = ('id', 'room_id', 'username')
