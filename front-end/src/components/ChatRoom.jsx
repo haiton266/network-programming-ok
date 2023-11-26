@@ -20,12 +20,7 @@ export default function ChatRoom({ socket }) {
   const [messages, setMessages] = useState([]);
   const [room, setRoom] = useState('');
   const [password, setPassword] = useState('');
-  const [rooms, setRooms] = useState([
-    { id: 1, name: "Room 1" },
-    { id: 2, name: "Room 2" },
-    { id: 3, name: "Room 3" },
-    // thêm các phòng khác tùy ý
-  ]);
+  const [rooms, setRooms] = useState([]);
   // const [isInRoom, setIsInRoom] = useState(false);
   const currentUser = localStorage.getItem('username');
   const messagesEndRef = useRef(null);
@@ -53,6 +48,11 @@ export default function ChatRoom({ socket }) {
       return;
     }
     socket.emit('join', { 'room': room, 'password': password });
+  };
+
+  const handleJoinRoomWithNoPassword = (idRoom) => {
+    setRoom(idRoom);
+    socket.emit('join_no_password', { 'room': idRoom });
   };
 
   const handleCreateRoom = () => {
@@ -127,7 +127,7 @@ export default function ChatRoom({ socket }) {
               {rooms.map((room) => (
                 <MDBListGroupItem
                   key={room.id}
-                  onClick={() => toast.info(`You are in room: ${room.name}`)}
+                  onClick={() => handleJoinRoomWithNoPassword(room.id)}
                 >
                   {room.name}
                 </MDBListGroupItem>

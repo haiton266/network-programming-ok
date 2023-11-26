@@ -6,6 +6,7 @@ from library.model import Users, ChatRooms, ChatMesssages, Members
 from library.extension import db
 from library.library_ma import UserSchema, ChatMessageSchema, ChatRoomSchema, MemberSchema
 import json
+import bcrypt
 
 from library.library_ma import ChatMessageSchema
 chat_message_schema = ChatMessageSchema(many=True)
@@ -44,16 +45,33 @@ def connected():
 @socketio.on('register')
 def register(data):
     username = data.get('username')
-    password = data.get('password')
+    password = data.get('password').encode('utf-8')
+    salt = bcrypt.gensalt()  # Generate a salt
+    hashed_password = bcrypt.hashpw(password, salt)
+    # Encode the password
+    # Hash the password
+    hashed_password = bcrypt.hashpw(password, bcrypt.gensalt())
 
-    # Check if the username already exists in the database
+    print('hashed_password :', hashed_password)
+
     existing_user = Users.query.filter_by(username=username).first()
     if existing_user:
         emit('register_status', {'status': 'failure',
              'message': 'Username already exists'})
     else:
-        # Create a new user
-        new_user = Users(username=username, password=password, sid='no')
+        new_user = Users(username=username, password=hashed_password, sid='no')
+        username = data.get('username')
+    password = data.get('password').encode('utf-8')  # Encode the password
+
+    # Hash the password
+    hashed_password = bcrypt.hashpw(password, bcrypt.gensalt())
+
+    existing_user = Users.query.filter_by(username=username).first()
+    if existing_user:
+        emit('register_status', {'status': 'failure',
+             'message': 'Username already exists'})
+    else:
+        new_user = Users(username=username, password=hashed_password, sid='no')
 
         try:
             # Add the new user to the database
@@ -73,10 +91,11 @@ logged_in_users = {}  # Dictionary to track logged-in users
 @socketio.on('login')
 def login(data):
     username = data.get('username')
-    password = data.get('password')
+    password = data.get('password').encode('utf-8')
+
     user = Users.query.filter_by(username=username).first()
 
-    if user and username == user.username and password == user.password:
+    if user and bcrypt.checkpw(password, user.password.encode('utf-8')):
         existing_sid = logged_in_users.get(username)
         if existing_sid:
             emit('login_status', {
@@ -85,10 +104,6 @@ def login(data):
             user.sid = request.sid
             db.session.commit()
             logged_in_users[username] = request.sid
-            room_of_user = Members.query.filter_by(username=username).all()
-            room_of_user = json.dumps(members_schema.dump(
-                room_of_user), ensure_ascii=False)
-            emit('get_rooms', {'rooms': room_of_user})
             emit('login_status', {'status': 'success',
                  'message': 'Logged in successfully!'})
     else:
@@ -99,13 +114,13 @@ def login(data):
 @socketio.on('autologin')
 def login(data):
     username = data.get('username')
-    if username and username not in logged_in_users:
-        logged_in_users[username] = request.sid
-        print('username: ', username)
+    if username:
         room_of_user = Members.query.filter_by(username=username).all()
         room_of_user = json.dumps(members_schema.dump(
             room_of_user), ensure_ascii=False)
         emit('get_rooms', {'rooms': room_of_user})
+    if username and username not in logged_in_users:
+        logged_in_users[username] = request.sid
         print('auto login success')
     else:
         print('auto login fail')
@@ -178,6 +193,38 @@ def join(data):
             room_of_user = json.dumps(members_schema.dump(
                 room_of_user), ensure_ascii=False)
             emit('get_rooms', {'rooms': room_of_user})
+
+            # Fetch old messages from Users table
+            messages = ChatMesssages.query.filter_by(room_id=room_id).all()
+            if messages:
+                # Sử dụng chat_message_schema để serialize dữ liệu
+                messages = json.dumps(chat_message_schema.dump(
+                    messages), ensure_ascii=False)
+                print('Old message: ', messages)
+                emit("old_messages", {'messages': messages})
+            else:
+                emit("old_messages", {'messages': '[]'})
+        else:
+            # Emit a message if the room does not exist or the password is incorrect
+            emit("joined", {"data": "Invalid room or password"})
+    else:
+        emit("joined", {"data": "Please login first"})
+
+
+@socketio.on('join_no_password')
+def join(data):
+    if is_user_logged_in(request.sid):
+        room_id = data['room']
+
+        # Query the ChatRooms table to find the room with the given room_id
+        chat_room = ChatRooms.query.filter_by(id=room_id).first()
+
+        if chat_room:
+            join_room(room_id)
+            room_user_map[request.sid] = room_id
+            emit("joined", {"data": f"You joined room {room_id}"})
+            username = next(
+                (username for username, sid in logged_in_users.items() if sid == request.sid), None)
 
             # Fetch old messages from Users table
             messages = ChatMesssages.query.filter_by(room_id=room_id).all()

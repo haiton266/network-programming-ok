@@ -12,6 +12,7 @@ This chat application is built using ReactJS, Flask Python, and Socket.IO. It pr
 - **Room Access Control**: Users can join rooms with valid credentials and participate in secure conversations.
 - **Room Creation**: Users have the ability to create new chat rooms.
 - **Multi-client Support**: The server can handle connections from multiple clients simultaneously.
+- **Save history ChatRoom joined**: The server can save ChatRoom joined, user needn't enter password to join room.
 
 ## Tech Stack
 

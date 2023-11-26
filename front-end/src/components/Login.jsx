@@ -37,7 +37,6 @@ export default function Login({ socket, onLoginSuccess }) {
         toast.error('Đăng nhập thất bại, vui lòng thử lại!, Lỗi: ' + data.message);
       }
     };
-
     socket.on("login_status", handleLoginStatus);
 
     return () => {
