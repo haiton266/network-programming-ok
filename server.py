@@ -1,5 +1,6 @@
-from flask import Flask, request, jsonify
-from flask_socketio import SocketIO, emit, join_room, leave_room
+import MySQLdb
+from flask import Flask, request, jsonify, session
+from flask_socketio import SocketIO, disconnect, emit, join_room, leave_room
 from flask_cors import CORS
 import eventlet
 from library.model import Users, ChatRooms, ChatMesssages, Members
@@ -7,17 +8,32 @@ from library.extension import db
 from library.library_ma import UserSchema, ChatMessageSchema, ChatRoomSchema, MemberSchema
 import json
 import bcrypt
+import asyncio
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
 
 from library.library_ma import ChatMessageSchema
 chat_message_schema = ChatMessageSchema(many=True)
 users_schema = UserSchema(many=True)
 rooms_schema = ChatRoomSchema(many=True)
 members_schema = MemberSchema(many=True)
+
+
 app = Flask(__name__)
+
+
+
 app.config['SECRET_KEY'] = 'secret!'
 CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*",
-                    ping_interval=10, ping_timeout=5)
+                    ping_interval=10, ping_timeout=5, async_mode='eventlet')
+
+
+
+
+
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://root:@localhost/network_db'
 # app.config['SECRET_KEY'] = 'my-secret-key'
@@ -28,11 +44,49 @@ with app.app_context():
 
 room_user_map = {}  # Lưu trữ thông tin người dùng và phòng tương ứng
 
-
+eventlet.monkey_patch()
 @app.route("/http-call")
-def http_call():
-    data = {'data': 'This text was fetched using an HTTP call to server on render'}
+async def http_call():
+    # Simulating an asynchronous operation
+    await asyncio.sleep(1)  # Wait for 1 second
+    data = {'data': 'Async data fetched'}
     return jsonify(data)
+
+
+
+async_engine = create_async_engine('mysql+aiomysql://root:@localhost/network_db')
+AsyncSessionLocal = sessionmaker(bind=async_engine, class_=AsyncSession)
+
+@app.route('/some-data')
+async def get_data():
+    some_query = text("SELECT * FROM my_table")  # Replace with your actual query
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(some_query)
+        data = result.scalars().all()
+        return jsonify(data)
+
+
+
+
+
+
+
+@socketio.on('some_event')
+async def handle_some_event(data):
+    await asyncio.sleep(1)  # Wait for 1 second
+    emit('response', {'data': 'Processed asynchronously'})
+
+
+
+def some_long_running_task():
+    # Time-consuming task
+    pass
+
+@socketio.on('start_task')
+def start_task(data):
+    socketio.start_background_task(some_long_running_task)
+    emit('task_started', {'data': 'Task started'})
+
 
 
 @socketio.on("connect")
@@ -42,46 +96,57 @@ def connected():
     emit("connect", {"data": f"id: {request.sid} is connected"})
 
 
+
+@socketio.on('inactive_user')
+def handle_inactive_user(data):
+    username = data.get('username')
+    sid = logged_in_users.get(username)
+
+    # Kiểm tra xem người dùng có đang đăng nhập không
+    if sid and sid == request.sid:
+        # Tạo thông báo hoặc thực hiện hành động khác
+        emit('force_logout', {'message': 'You have been inactive. Please login again.'}, room=sid)
+
+        # Xóa thông tin người dùng từ danh sách đăng nhập
+        del logged_in_users[username]
+        
+        # Xóa SID từ room_user_map và yêu cầu rời phòng (nếu cần)
+        room = room_user_map.pop(sid, None)
+        if room:
+            leave_room(room)
+        socketio.emit('inactive_user', room=sid)
+        disconnect()
+        
+        print(f"User {username} has been marked as inactive and logged out.")
+
+
+
 @socketio.on('register')
 def register(data):
     username = data.get('username')
     password = data.get('password').encode('utf-8')
-    salt = bcrypt.gensalt()  # Generate a salt
+
+    # Check if the user already exists
+    existing_user = Users.query.filter_by(username=username).first()
+    if existing_user:
+        emit('register_status', {'status': 'failure', 'message': 'Username already exists'})
+        return
+
+    # Generate a salt and hash the password
+    salt = bcrypt.gensalt()
     hashed_password = bcrypt.hashpw(password, salt)
-    # Encode the password
-    # Hash the password
-    hashed_password = bcrypt.hashpw(password, bcrypt.gensalt())
 
-    print('hashed_password :', hashed_password)
-
-
-    existing_user = Users.query.filter_by(username=username).first()
-    if existing_user:
-        emit('register_status', {'status': 'failure', 'message': 'Username already exists'})
-    else:
-        new_user = Users(username=username, password=hashed_password, sid='no')    
-        username = data.get('username')
-    password = data.get('password').encode('utf-8')  # Encode the password
-
-    # Hash the password
-    hashed_password = bcrypt.hashpw(password, bcrypt.gensalt())
-
-    existing_user = Users.query.filter_by(username=username).first()
-    if existing_user:
-        emit('register_status', {'status': 'failure', 'message': 'Username already exists'})
-    else:
-        new_user = Users(username=username, password=hashed_password, sid='no')
-
-        try:
-            # Add the new user to the database
-            db.session.add(new_user)
-            db.session.commit()
-            emit('register_status', {'status': 'success',
-                 'message': 'User registered successfully'})
-        except Exception as e:
-            # Handle any exceptions that might occur during registration
-            emit('register_status', {
-                 'status': 'failure', 'message': 'Registration failed', 'error': str(e)})
+    # Create a new user instance
+    new_user = Users(username=username, password=hashed_password, sid='no')
+    
+    try:
+        # Add the new user to the database
+        db.session.add(new_user)
+        db.session.commit()
+        emit('register_status', {'status': 'success', 'message': 'User registered successfully'})
+    except Exception as e:
+        # Handle any exceptions that might occur during registration
+        emit('register_status', {'status': 'failure', 'message': 'Registration failed', 'error': str(e)})
 
 
 logged_in_users = {}  # Dictionary to track logged-in users
@@ -243,14 +308,15 @@ def logout():
             db.session.commit()
             if room:
                 leave_room(room)
+            # Clear the session when logging out
+            session.pop('username', None)
             emit('logout_status', {'status': 'success',
-                 'message': 'Logged out successfully'})
+                'message': 'Logged out successfully'})
             print("User logged out")
             return
     emit('logout_status', {'status': 'failure',
-                           'message': 'Not logged in'})
+        'message': 'Not logged in'})
     print("User not logged in")
-
 
 @socketio.on("disconnect")
 def disconnected():

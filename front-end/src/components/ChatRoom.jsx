@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import AES from 'crypto-js/aes';
+import Utf8 from 'crypto-js/enc-utf8';
 import {
   MDBContainer,
   MDBRow,
@@ -15,7 +17,9 @@ import {
 import { Form, Button } from 'react-bootstrap';
 import { toast } from 'react-toastify';
 
+
 export default function ChatRoom({ socket }) {
+  const [lastActive, setLastActive] = useState(Date.now());
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [room, setRoom] = useState('');
@@ -30,12 +34,26 @@ export default function ChatRoom({ socket }) {
   const currentUser = localStorage.getItem('username');
   const messagesEndRef = useRef(null);
 
+
+
+  const secretKey = 'your-secret-key'; // Đặt khóa bí mật của bạn
+
+  function encryptMessage(message) {
+    return AES.encrypt(message, secretKey).toString();
+  }
+  
+  function decryptMessage(encryptedMessage) {
+    const bytes = AES.decrypt(encryptedMessage, secretKey);
+    return bytes.toString(Utf8);
+  }   
+
+
   const handleText = (e) => {
     const inputMessage = e.target.value;
     setMessage(inputMessage);
   };
 
-  const handleSubmit = () => {
+  const handleMessageSubmit = () => {
     if (!message) {
       toast.error('Please enter a message!');
       return;
@@ -43,7 +61,9 @@ export default function ChatRoom({ socket }) {
       toast.error('Please enter a room name!');
       return;
     }
-    socket.emit('data', message);
+  
+    const encryptedMessage = encryptMessage(message);
+    socket.emit('data', encryptedMessage);
     setMessage('');
   };
 
@@ -64,6 +84,10 @@ export default function ChatRoom({ socket }) {
     socket.emit('create', { 'password': password, 'username': currentUser });
   };
 
+  const updateActivity = () => {
+    setLastActive(Date.now());
+  };
+
 
   useEffect(() => {
     socket.emit('autologin', { 'username': currentUser });
@@ -81,16 +105,31 @@ export default function ChatRoom({ socket }) {
     socket.on('old_messages', (data) => {
       let x = JSON.parse(data.messages);
       // Transform x into the desired format for messages
-      const newMessages = x.map(msg => ({
-        user: msg.username,
-        data: msg.message // Assuming you want to store the password as 'data'
-      }));
+      const newMessages = x.map(msg => {
+        let decryptedMessage;
+        try {
+          decryptedMessage = decryptMessage(msg.message);
+        } catch (error) {
+          console.error('Failed to decrypt message:', error);
+          decryptedMessage = msg.message; // Use the original message if decryption fails
+        }
+        return {
+          user: msg.username,
+          data: decryptedMessage
+        };
+      });
       console.log('newMessages', newMessages);
       setMessages(newMessages);
     });
 
     socket.on('data', (data) => {
-      setMessages((prevMessages) => [...prevMessages, { user: data.name, data: data.data }]);
+ 
+      try {
+        const decryptedMessage = decryptMessage(data.data);
+        setMessages((prevMessages) => [...prevMessages, { user: data.name, data: decryptedMessage }]);
+      } catch (error) {
+        console.error('Failed to decrypt message:', error);
+      }
     });
 
     socket.on('joined', (data) => {
@@ -118,6 +157,34 @@ export default function ChatRoom({ socket }) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  useEffect(() => {
+    const checkActivity = () => {
+      const now = Date.now();
+      const inactiveDuration = now - lastActive;
+      // Giả sử timeout là 5 phút (300000 milliseconds)
+      if (inactiveDuration > 2000000) {
+        // Gửi thông tin không hoạt động tới server
+        socket.emit('inactive_user', { username: currentUser });
+      }
+    };
+        // Thiết lập interval kiểm tra mỗi phút
+        const intervalId = setInterval(checkActivity, 200000);
+
+        return () => {
+          clearInterval(intervalId);
+        };
+      }, [lastActive, socket]);
+    
+      // Thêm event listeners để cập nhật hoạt động
+      useEffect(() => {
+        window.addEventListener('mousemove', updateActivity);
+        window.addEventListener('keydown', updateActivity);
+    
+        return () => {
+          window.removeEventListener('mousemove', updateActivity);
+          window.removeEventListener('keydown', updateActivity);
+        };
+      }, []);
   return (
     <>
       <MDBContainer fluid className="py-5" style={{ backgroundColor: '#eee' }}>
@@ -189,9 +256,9 @@ export default function ChatRoom({ socket }) {
               </MDBCardBody>
               <MDBCardFooter className="text-muted d-flex justify-content-start align-items-center p-3">
                 <MDBInput type="text" className="form-control form-control-lg" placeholder="Type your message here" value={message} onChange={handleText} />
-                <Button onClick={handleSubmit} className="ms-2">
-                  <MDBIcon fas icon="paper-plane" />
-                </Button>
+                <Button onClick={handleMessageSubmit} className="ms-2">
+  <MDBIcon fas icon="paper-plane" />
+</Button>
               </MDBCardFooter>
             </MDBCard>
           </MDBCol>
